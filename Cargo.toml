@@ -1,5 +1,5 @@
 [workspace]
-members  = ["modules/store", "modules/python", "modules/cli"]
+members  = ["modules/core", "modules/py", "modules/cli"]
 resolver = "3"
 
 [workspace.package]
@@ -12,7 +12,7 @@ keywords   = ["python", "secrets", "dotenv", "encryption"]
 categories = ["cryptography", "config"]
 
 [workspace.dependencies]
-secure-store-core = { path = "modules/store", version = "0.1" }
+secure-store-core = { path = "modules/core", version = "0.1" }
 zeroize           = "1"
 
 [profile.release]

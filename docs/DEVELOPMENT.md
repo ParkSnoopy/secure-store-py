@@ -5,16 +5,16 @@ Building the native module requires Python 3.10 or newer, uv, and a Rust toolcha
 
 ## Workspace
 
-- [Store](../modules/store/src/lib.rs) owns dotenv parsing, bounded reads, password derivation, authenticated serialization, and per-value decryption.
-- [Python](../modules/python/src/lib.rs) exposes the shared store through PyO3.
+- [Core](../modules/core/src/lib.rs) owns dotenv parsing, bounded reads, password derivation, authenticated serialization, and per-value decryption.
+- [Python](../modules/py/src/lib.rs) exposes the shared store through PyO3.
 - [Python package](../python/secure_store/__init__.py) preserves the public import surface around the native extension.
 - [Nuitka hook](../python/secure_store/nuitka_plugin.py) encrypts dotenv during the application build without recompiling Rust.
-- [Native embedded build](../modules/python/build.rs) supports optional wheel-level embedding.
+- [Native embedded build](../modules/py/build.rs) supports optional wheel-level embedding.
 - [CLI](../modules/cli/src/main.rs) reads passwords and publishes encrypted vault files without overwriting existing files.
 
 The Cargo workspace shares dependencies, package metadata, and the original strict lint policy.
 The Python and CLI crates call the same store implementation.
-New local storage behavior belongs in the store crate, not a second Python implementation.
+New local storage behavior belongs in the core crate, not a second Python implementation.
 
 ## Generic wheel
 
@@ -104,7 +104,7 @@ uvx ruff check python tests examples
 uvx ruff format --check python tests examples
 ```
 
-[Rust integration tests](../modules/store/tests/vault.rs) exercise the shared store interface, malformed inputs, authentication failures, entry deletion, renaming, substitution, and bounded file reads.
+[Rust integration tests](../modules/core/tests/vault.rs) exercise the shared store interface, malformed inputs, authentication failures, entry deletion, renaming, substitution, and bounded file reads.
 [Python and CLI tests](../tests/test_store.py) exercise the installed extension and the real executable.
 Set SECURE_STORE_CLI to run CLI cases instead of skipping them.
 Only set SECURE_STORE_TEST_EMBEDDED when testing a wheel built with the demonstration fixture.

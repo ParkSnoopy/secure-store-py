@@ -21,6 +21,6 @@ nuitka = [
 Repository = "https://github.com/ParkSnoopy/secure-store-py"
 
 [tool.maturin]
-manifest-path = "modules/python/Cargo.toml"
+manifest-path = "modules/py/Cargo.toml"
 python-source = "python"
 module-name = "secure_store._native"

@@ -111,11 +111,11 @@ See [packaging smoke checks](DEVELOPMENT.md#packaging-smoke-checks) for the demo
 
 ## Module ownership
 
-- [Store](../modules/store/src/lib.rs) owns dotenv parsing, bounded reads, password derivation, authenticated serialization, and per-value decryption.
-- [Python bindings](../modules/python/src/lib.rs) expose the shared store through PyO3.
+- [Core](../modules/core/src/lib.rs) owns dotenv parsing, bounded reads, password derivation, authenticated serialization, and per-value decryption.
+- [Python bindings](../modules/py/src/lib.rs) expose the shared store through PyO3.
 - [Nuitka entry point](../python/secure_store/__main__.py) enables the installed [build hook](../python/secure_store/nuitka_plugin.py).
 - [Embedded resource](../python/secure_store/_embedded.py) holds the stub that the build hook replaces in memory.
-- [Native embedded build](../modules/python/build.rs) provides optional wheel-level embedding.
+- [Native embedded build](../modules/py/build.rs) provides optional wheel-level embedding.
 - [CLI](../modules/cli/src/main.rs) reads passwords and publishes encrypted vault files without overwriting existing files.
 
 The Python and CLI crates share the same store implementation.
