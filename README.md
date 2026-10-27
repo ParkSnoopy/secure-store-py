@@ -10,7 +10,7 @@ API_URL='https://api.example.com'
 ```python
 from secure_store import Store
 
-vault = Store.open(".env")
+vault = Store.open()
 api_key = vault.get("API_KEY")
 api_url = vault.get("API_URL")
 

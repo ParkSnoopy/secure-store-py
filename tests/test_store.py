@@ -110,6 +110,19 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.get("API_KEY"), MARKER)
             self.assertEqual(dict(os.environ), before)
             self.assertEqual(path.read_text(encoding="utf-8"), SOURCE)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from secure_store import Store; assert Store.open().get('API_KEY') == 'synthetic-secret-marker'",
+                ],
+                cwd=directory,
+                capture_output=True,
+                check=False,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(b"plaintext dotenv", result.stderr)
             for data in [b"\xff", b"API_KEY='unterminated", b"x" * (64 * 1024 + 1)]:
                 path.write_bytes(data)
                 with self.assertWarns(RuntimeWarning), self.assertRaises(ValueError):
@@ -165,6 +178,7 @@ class StoreTests(unittest.TestCase):
                     self.assertEqual(
                         secure_store.Store.open("any-name.env").get("API_KEY"), MARKER
                     )
+                    self.assertEqual(secure_store.Store.open().get("API_KEY"), MARKER)
                     self.assertEqual(
                         secure_store.Store.open(external, PASSWORD).get("API_KEY"),
                         "external-value",
@@ -413,9 +427,23 @@ class NuitkaBuildTests(unittest.TestCase):
             for missing in [None, ""]:
                 result = self.build(missing, entry, root / "out", ["--mode=standalone"])
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn(
-                    b"Set SECURE_STORE_ENV_FILE", result.stdout + result.stderr
+                self.assertIn(b"Cannot encrypt", result.stdout + result.stderr)
+            (root / ".env").write_text(SOURCE, encoding="utf-8")
+            for missing in [None, ""]:
+                result = self.build(
+                    missing,
+                    entry,
+                    root / "out",
+                    ["--mode=standalone", "--generate-c-only"],
                 )
+                self.assertEqual(
+                    result.returncode, 0, result.stderr.decode(errors="replace")
+                )
+            result = self.build(
+                root / "missing.env", entry, root / "out", ["--mode=standalone"]
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"Cannot encrypt", result.stdout + result.stderr)
             result = self.build(source, entry, root / "out")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b"Use --mode=standalone", result.stdout + result.stderr)
@@ -468,14 +496,14 @@ class NuitkaBuildTests(unittest.TestCase):
         original = resource.read_bytes()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source, entry = root / "input.env", root / "app.py"
+            source, entry = root / ".env", root / "app.py"
             source.write_text(SOURCE)
             expected = hashlib.sha256(MARKER.encode()).hexdigest()
             entry.write_text(
                 "import os\nfrom hashlib import sha256\nfrom secure_store import Store\n"
                 "if 'SECURE_STORE_CRED' in os.environ:\n"
                 "    raise RuntimeError('Unexpected runtime credential')\n"
-                "value = Store.open('.env').get('API_KEY')\n"
+                "value = Store.open().get('API_KEY')\n"
                 f"if sha256(value.encode()).hexdigest() != {expected!r}:\n"
                 "    raise RuntimeError('Wrong embedded vault')\n"
                 "print('Application build vault unlocked.')\n"
@@ -485,7 +513,7 @@ class NuitkaBuildTests(unittest.TestCase):
             for label, credential in [("generated", None), ("supplied", PASSWORD)]:
                 build_output = output / label
                 result = self.build(
-                    source,
+                    None if label == "generated" else source,
                     entry,
                     build_output,
                     ["--mode=onefile", "--assume-yes-for-downloads"],
@@ -530,7 +558,7 @@ class NuitkaBuildTests(unittest.TestCase):
                     self.assertFalse(
                         PASSWORD.encode() in data, f"plaintext password in {path}"
                     )
-                    self.assertNotEqual(path.name, "input.env")
+                    self.assertNotEqual(path.name, ".env")
         self.assertEqual(resource.read_bytes(), original)
         self.assertIsNone(_embedded.DATA)
 

@@ -17,14 +17,12 @@ class NuitkaPluginSecureStore(NuitkaPluginBase):
     plugin_desc = "Encrypt dotenv inside the Python application build."
 
     def __init__(self):
-        source = os.environ.pop("SECURE_STORE_ENV_FILE", None)
+        source = os.environ.pop("SECURE_STORE_ENV_FILE", None) or ".env"
         credential = os.environ.pop("SECURE_STORE_CRED", None)
         if not isStandaloneMode():
             self.sysexit(
                 "Use --mode=standalone or --mode=onefile for secure-store builds."
             )
-        if not source:
-            self.sysexit("Set SECURE_STORE_ENV_FILE for this build.")
         try:
             if not credential:
                 credential = secrets.token_urlsafe(32)

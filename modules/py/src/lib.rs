@@ -29,8 +29,9 @@ impl PythonStore {
 
     /// Open an embedded store, a development dotenv file, or a password vault.
     #[staticmethod]
-    #[pyo3(signature = (path, password=None))]
-    fn open(py: Python<'_>, path: PathBuf, password: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (path=None, password=None))]
+    fn open(py: Python<'_>, path: Option<PathBuf>, password: Option<&str>) -> PyResult<Self> {
+        let path = path.unwrap_or_else(|| PathBuf::from(".env"));
         if let Some(password) = password {
             return py
                 .detach(|| Vault::open_file(path, password.as_bytes()))

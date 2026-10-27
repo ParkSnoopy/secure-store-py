@@ -2,7 +2,7 @@
 
 from secure_store import Store
 
-store = Store.open(".env")
+store = Store.open()
 if not store.get("API_KEY"):
     raise RuntimeError("The demo API key is empty.")
 print("Native embedded vault unlocked.")

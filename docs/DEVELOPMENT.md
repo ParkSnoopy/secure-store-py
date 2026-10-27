@@ -71,7 +71,7 @@ SECURE_STORE_TEST_BUILD=1 SECURE_STORE_TEST_BUILD_DIR="$(pwd)/target/nuitka-buil
 The build regression starts with plaintext dotenv and no encrypted vault, with both generated and supplied build passwords.
 It invokes the installed Python compiler entry point with unusable CARGO and RUSTC selections.
 It removes the source and dotenv before running both executables from an empty directory without build variables.
-The test calls `Store.open(".env")` and checks automatic unlocking without a runtime password.
+The test calls `Store.open()` and checks automatic unlocking without a runtime password.
 It checks the generated build files and distribution for the synthetic plaintext value and password.
 The installed embedded-resource stub must remain unchanged.
 Input failures, plaintext data-file inclusion, and excluded embedded modules have separate rejection cases.

@@ -77,7 +77,8 @@ Protect that file separately and never package it with the vault.
 
 ## Python application-build encryption
 
-The Nuitka hook requires SECURE_STORE_ENV_FILE and accepts an optional SECURE_STORE_CRED inside the application build.
+The Nuitka hook defaults to `.env` in the build's current working directory when SECURE_STORE_ENV_FILE is missing or empty.
+It accepts SECURE_STORE_ENV_FILE and SECURE_STORE_CRED as optional overrides.
 If the credential is missing or empty, the hook generates a fresh password from 32 bytes of cryptographic randomness.
 The hook removes the variables from that process environment before C compilation.
 The hook invokes the installed native extension for bounded input reads, dotenv parsing, and encryption.
