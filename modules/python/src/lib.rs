@@ -35,10 +35,17 @@ impl PythonStore {
             .map_err(|error| python_error(&error))
     }
 
-    /// Open the vault compiled into this extension, if present.
+    /// Open an application-build bundle or the vault compiled into this extension.
     #[staticmethod]
     fn embedded(py: Python<'_>) -> PyResult<Self> {
-        py.detach(embedded_store)
+        let data = py.import("secure_store._embedded")?.getattr("DATA")?;
+        let result = if data.is_none() {
+            py.detach(embedded_store)
+        } else {
+            let data = data.cast::<PyBytes>()?.as_bytes();
+            py.detach(|| Vault::open_embedded(data))
+        };
+        result
             .map(|inner| Self { inner })
             .map_err(|error| python_error(&error))
     }
@@ -63,6 +70,19 @@ fn seal<'py>(py: Python<'py>, dotenv: &str, password: &str) -> PyResult<Bound<'p
     Ok(PyBytes::new(py, &data))
 }
 
+/// Encrypt a bounded dotenv file for the Python application build hook.
+#[pyfunction(name = "_seal_embedded_file")]
+fn seal_embedded_file<'py>(
+    py: Python<'py>,
+    path: PathBuf,
+    password: &str,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let data = py
+        .detach(|| secure_store_core::seal_embedded_file(path, password.as_bytes()))
+        .map_err(|error| python_error(&error))?;
+    Ok(PyBytes::new(py, &data))
+}
+
 fn python_error(error: &StoreError) -> PyErr {
     match error {
         StoreError::NotFound => PyKeyError::new_err(error.to_string()),
@@ -79,10 +99,11 @@ fn python_error(error: &StoreError) -> PyErr {
 }
 
 /// Register the native Python interface.
-#[pymodule(gil_used = false)]
-fn secure_store(module: &Bound<'_, PyModule>) -> PyResult<()> {
+#[pymodule(name = "_native", gil_used = false)]
+fn native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PythonStore>()?;
     module.add_function(wrap_pyfunction!(seal, module)?)?;
+    module.add_function(wrap_pyfunction!(seal_embedded_file, module)?)?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

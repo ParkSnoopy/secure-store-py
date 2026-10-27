@@ -1,4 +1,4 @@
-"""Run after building a native module with examples/demo.env embedded."""
+"""Read the vault encrypted inside the Python application build."""
 
 from secure_store import Store
 

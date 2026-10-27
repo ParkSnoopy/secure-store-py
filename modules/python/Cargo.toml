@@ -11,7 +11,7 @@ description          = "Native Python bindings for local encrypted API key vault
 readme               = "../../README.md"
 
 [lib]
-name       = "secure_store"
+name       = "_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

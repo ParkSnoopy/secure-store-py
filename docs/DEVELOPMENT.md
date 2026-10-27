@@ -7,30 +7,37 @@ Building the native module requires Python 3.10 or newer, uv, and a Rust toolcha
 
 - [Store](../modules/store/src/lib.rs) owns dotenv parsing, bounded reads, password derivation, authenticated serialization, and per-value decryption.
 - [Python](../modules/python/src/lib.rs) exposes the shared store through PyO3.
-- [Embedded build](../modules/python/build.rs) encrypts an explicitly selected dotenv file during compilation.
+- [Python package](../python/secure_store/__init__.py) preserves the public import surface around the native extension.
+- [Nuitka hook](../python/secure_store/nuitka_plugin.py) encrypts dotenv during the application build without recompiling Rust.
+- [Native embedded build](../modules/python/build.rs) supports optional wheel-level embedding.
 - [CLI](../modules/cli/src/main.rs) reads passwords and publishes encrypted vault files without overwriting existing files.
 
 The Cargo workspace shares dependencies, package metadata, and the original strict lint policy.
 The Python and CLI crates call the same store implementation.
 New local storage behavior belongs in the store crate, not a second Python implementation.
 
-## External-password wheel
+## Generic wheel
 
 ```bash
 uv venv --python 3.12 .venv
-uvx maturin build --release --locked --out target/wheels-external
-uv pip install --python .venv/bin/python --reinstall target/wheels-external/*.whl
+env -u SECURE_STORE_ENV_FILE -u SECURE_STORE_CRED uvx maturin build --release --locked --out target/wheels-generic
+uv pip install --python .venv/bin/python --reinstall target/wheels-generic/*.whl
 cargo build --locked -p secure-store-cli
 SECURE_STORE_CLI="$(pwd)/target/debug/secure-store" .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Do not set SECURE_STORE_ENV_FILE for this build.
+Generic wheels contain no application credentials and support external vaults and Nuitka application-build embedding.
+Producing the wheel requires Rust, but installing it and building applications against it do not.
+Public package indexes must receive generic wheels only.
+Build compatible wheels for each supported OS and architecture.
+The extension uses the CPython stable ABI from Python 3.10.
+Linux wheel tags must reflect the actual manylinux or musllinux compatibility.
 
 The CLI accepts two positional paths: dotenv input and encrypted output.
 It requests a password twice unless --password-file supplies a protected UTF-8 file.
 It never prints decrypted values.
 
-## Embedded wheel
+## Native embedded wheel
 
 The fixture below contains only a synthetic demonstration key.
 Never put real credentials in that fixture.
@@ -49,19 +56,34 @@ Cargo generates embedded material in its build output rather than the source tre
 
 ## Packaging smoke checks
 
-Build and install the demonstration embedded wheel before these checks.
-For the Nuitka command, the wheel output directory must contain exactly one selected wheel.
-The commands below target Linux and Python 3.12.
+Build a generic wheel, then set WHEEL to its absolute path.
+The following commands target Linux and Python 3.12.
+The credential below and [dotenv fixture](../examples/demo.env) are synthetic demonstration data.
 
 ```bash
-uvx --python 3.12 --with patchelf --with zstandard --with "$(pwd)"/target/wheels-embedded/*.whl nuitka --onefile --include-package=secure_store --output-dir=target/nuitka --assume-yes-for-downloads examples/embedded.py
-uvx --python 3.12 pyarmor gen -O target/pyarmor examples/embedded.py
-SECURE_STORE_TEST_EMBEDDED=1 SECURE_STORE_CLI="$(pwd)/target/debug/secure-store" SECURE_STORE_NUITKA_BINARY="$(pwd)/target/nuitka/embedded.bin" SECURE_STORE_PYARMOR_SCRIPT="$(pwd)/target/pyarmor/embedded.py" .venv/bin/python -m unittest discover -s tests -v
+uv pip install --python .venv/bin/python "${WHEEL}[nuitka]"
+source .venv/bin/activate
+SECURE_STORE_ENV_FILE=examples/demo.env SECURE_STORE_CRED=synthetic-build-password-only python -m secure_store --mode=onefile --output-dir=target/nuitka-app --assume-yes-for-downloads examples/embedded.py
+SECURE_STORE_NUITKA_BINARY="$(pwd)/target/nuitka-app/embedded.bin" python -m unittest discover -s tests -v
+SECURE_STORE_TEST_BUILD=1 SECURE_STORE_TEST_BUILD_DIR="$(pwd)/target/nuitka-build" python -m unittest discover -s tests -v
 ```
 
-The distribution checks run Nuitka's standalone and onefile executables from an empty temporary directory.
-They also check the generated distribution files for the synthetic plaintext key.
-The PyArmor check exercises the trial runtime, not paid protection options.
+The build regression starts with plaintext dotenv and no encrypted vault.
+It invokes the installed Python compiler entry point with unusable CARGO and RUSTC selections.
+It removes the source and dotenv before running both executables from an empty directory without build variables.
+It checks the generated build files and distribution for the synthetic plaintext value and password.
+The installed embedded-resource stub must remain unchanged.
+Input failures, plaintext data-file inclusion, and excluded embedded modules have separate rejection cases.
+
+For the existing PyArmor smoke check, first install a native embedded wheel built with the demonstration fixture:
+
+```bash
+uvx --python 3.12 pyarmor gen -O target/pyarmor examples/embedded.py
+SECURE_STORE_TEST_EMBEDDED=1 SECURE_STORE_PYARMOR_SCRIPT="$(pwd)/target/pyarmor/embedded.py" python -m unittest discover -s tests -v
+```
+
+The PyArmor check exercises the trial runtime, not paid protection options or the Nuitka hook.
+Reinstall the generic wheel before running the application-build regression.
 
 For independent Argon2 and libsodium decryption checks, run:
 
@@ -78,8 +100,8 @@ cargo fmt --all --check
 cargo test --locked --workspace --no-fail-fast
 cargo clippy --locked --workspace --all-targets --all-features
 cargo deny check advisories licenses bans sources
-uvx ruff check tests examples
-uvx ruff format --check tests examples
+uvx ruff check python tests examples
+uvx ruff format --check python tests examples
 ```
 
 [Rust integration tests](../modules/store/tests/vault.rs) exercise the shared store interface, malformed inputs, authentication failures, entry deletion, renaming, substitution, and bounded file reads.

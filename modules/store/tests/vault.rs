@@ -4,7 +4,8 @@ use std::io::Write as _;
 
 use anyhow::{Context as _, Result, ensure};
 use secure_store_core::{
-    MAX_ENV_BYTES, MAX_PASSWORD_BYTES, MAX_VAULT_BYTES, Store, StoreError, seal_dotenv, seal_file,
+    MAX_EMBEDDED_BYTES, MAX_ENV_BYTES, MAX_PASSWORD_BYTES, MAX_VAULT_BYTES, Store, StoreError,
+    seal_dotenv, seal_embedded, seal_embedded_file, seal_file,
 };
 use serde_json::{Value, json};
 use tempfile::NamedTempFile;
@@ -256,5 +257,86 @@ fn file_interfaces_round_trip_and_reject_invalid_files() -> Result<()> {
         ),
         "missing file accepted"
     );
+    Ok(())
+}
+
+#[test]
+fn embedded_bundles_round_trip_without_plaintext_passwords_or_values() -> Result<()> {
+    for source in [SOURCE, ""] {
+        let data = seal_embedded(source, PASSWORD)?;
+        let store = Store::open_embedded(&data)?;
+        if source.is_empty() {
+            ensure!(matches!(store.get("API_KEY"), Err(StoreError::NotFound)));
+        } else {
+            ensure!(*store.get("API_KEY")? == "synthetic-secret-marker");
+        }
+        ensure!(!data.windows(PASSWORD.len()).any(|bytes| bytes == PASSWORD));
+        ensure!(
+            !data
+                .windows(b"synthetic-secret-marker".len())
+                .any(|bytes| bytes == b"synthetic-secret-marker")
+        );
+        ensure!(
+            data != seal_embedded(source, PASSWORD)?,
+            "bundle reused randomness"
+        );
+        Store::open(&data[68..], PASSWORD)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn embedded_bundles_reject_modified_headers_keys_manifests_and_limits() -> Result<()> {
+    let data = seal_embedded(SOURCE, PASSWORD)?;
+    for length in 0..=68 {
+        ensure!(Store::open_embedded(&data[..length]).is_err());
+    }
+    for offset in [0, 4, 36, 68, data.len() - 1] {
+        let mut changed = data.clone();
+        changed[offset] ^= 1;
+        ensure!(
+            Store::open_embedded(&changed).is_err(),
+            "modified bundle accepted"
+        );
+    }
+    ensure!(matches!(
+        Store::open_embedded(&vec![0; MAX_EMBEDDED_BYTES + 1]),
+        Err(StoreError::SizeLimit)
+    ));
+    for password in [Vec::new(), vec![b'x'; MAX_PASSWORD_BYTES + 1]] {
+        ensure!(matches!(
+            seal_embedded(SOURCE, &password),
+            Err(StoreError::InvalidPassword)
+        ));
+    }
+    ensure!(matches!(
+        seal_embedded(&"x".repeat(MAX_ENV_BYTES + 1), PASSWORD),
+        Err(StoreError::SizeLimit)
+    ));
+    Ok(())
+}
+
+#[test]
+fn embedded_file_builds_preserve_source_and_enforce_input_bounds() -> Result<()> {
+    let mut source = NamedTempFile::new()?;
+    source.write_all(SOURCE.as_bytes())?;
+    let data = seal_embedded_file(source.path(), PASSWORD)?;
+    ensure!(*Store::open_embedded(&data)?.get("API_KEY")? == "synthetic-secret-marker");
+    ensure!(std::fs::read_to_string(source.path())? == SOURCE);
+    source.as_file().set_len((MAX_ENV_BYTES + 1) as u64)?;
+    ensure!(matches!(
+        seal_embedded_file(source.path(), PASSWORD),
+        Err(StoreError::SizeLimit)
+    ));
+    let mut invalid = NamedTempFile::new()?;
+    invalid.write_all(&[0xff])?;
+    ensure!(matches!(
+        seal_embedded_file(invalid.path(), PASSWORD),
+        Err(StoreError::InvalidEnv)
+    ));
+    ensure!(matches!(
+        seal_embedded_file(source.path().with_extension("missing"), PASSWORD),
+        Err(StoreError::Io(_))
+    ));
     Ok(())
 }

@@ -8,10 +8,11 @@ Do not distribute the password beside the vault or place it in application sourc
 An operating-system credential manager can supply the password through application code.
 This project does not provide a credential-manager adapter.
 
-Embedded mode stores encrypted values and masked random unlock material in the native extension.
+Embedded mode packages encrypted values and masked unlock material in the application or native extension.
 The masking obstructs simple static inspection only.
 Anyone who can inspect or control the running app can recover the unlock material or plaintext values.
-Anyone who can load the extension can call Store.embedded().get(name) without a debugger.
+Anyone who can load an embedded wheel can call Store.embedded().get(name) without a debugger.
+Application-build bundles contain equivalent recoverable unlock material.
 Nuitka, PyArmor, and native compilation do not remove this limitation.
 A shared provider key remains a shared credential after distribution.
 Use provider restrictions, quotas, and rotation to limit exposure.
@@ -52,19 +53,44 @@ Parsing uses dotenvy, including its quote, escape, and variable-expansion rules.
 Expansion occurs when sealing, not when retrieving values.
 Use single quotes for literal API keys that contain dollar signs or backslashes.
 Duplicate names use the last assignment.
-The module never changes the process environment.
+Native vault operations never change the process environment.
 
 ## Distribution and updates
 
 Keep the original dotenv input, password files, build caches, and source archives private.
 Cargo's generated embedded bindings contain recoverable unlock material.
-Build separate wheels for separate applications.
-Replacing embedded credentials requires rebuilding and redistributing the wheel and any packaged application.
-Build without SECURE_STORE_ENV_FILE for an external-password-only wheel.
-An ordinary wheel must reject Store.embedded() rather than use a fallback credential.
+Keep separate artifacts for applications with different embedded credentials.
+Replacing application-build credentials requires rebuilding and redistributing the application, not its generic native wheel.
+Replacing wheel-level embedded credentials requires rebuilding and redistributing the wheel and any packaged application.
+Build without SECURE_STORE_ENV_FILE for a generic wheel.
+A generic wheel outside a hooked application must reject Store.embedded() rather than use a fallback credential.
 
 The CLI creates output through a temporary file and refuses an existing destination.
 On Unix, the temporary file and published vault have owner-only permissions.
 The original dotenv input remains unchanged.
 For noninteractive sealing, --password-file reads a UTF-8 password and removes trailing CR/LF bytes.
 Protect that file separately and never package it with the vault.
+
+## Python application-build encryption
+
+The Nuitka hook reads SECURE_STORE_ENV_FILE and SECURE_STORE_CRED inside the application build.
+Both variables are mandatory.
+The hook removes them from that process environment before C compilation.
+The hook invokes the installed native extension for bounded input reads, dotenv parsing, and encryption.
+It supplies generated module source in memory without changing installed package files.
+It rejects distribution of the selected plaintext input as a data file, including filesystem aliases.
+It also rejects exclusion of the embedded resource.
+
+The bundle starts with the four bytes `SSB1`, followed by a random 32-byte mask and the 32-byte derived key XORed with that mask.
+The remaining bytes are the normal authenticated version-1 vault.
+The store limits bundle size to the vault limit plus its 68-byte header.
+Opening reconstructs the key in native memory and authenticates the manifest before returning a store.
+It does not require the original password or repeat password derivation at runtime.
+Malformed bundles and authentication failures must not fall back to a wheel-level vault.
+
+The original password and plaintext values are not generated as resource literals.
+The environment still contains plaintext credentials during part of the build and may be inspected by local processes or CI infrastructure.
+Literal shell assignments can expose credentials through command history, and shell tracing can expose expanded variables.
+The build process and Python allocator may retain credential copies despite removing environment variables.
+Generated resource data, build caches, and final binaries contain recoverable decryption capability.
+Passing a plaintext scan proves only the absence of that searched representation, not confidentiality from the recipient.

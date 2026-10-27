@@ -3,14 +3,15 @@
 Secure Store is a native Python module that stores API keys as encrypted dotenv values.
 The Python import name is `secure_store`.
 Run the commands below from the repository root.
-Building the module requires Python 3.10 or newer, uv, and a Rust toolchain.
+Building the native wheel requires Python 3.10 or newer, uv, and a Rust toolchain.
+Installing a compatible prebuilt wheel and building an application with it do not require Cargo.
 
 ## Local storage modes
 
 - **External password:** keep the password outside the distributed app. This protects a copied vault when the password remains secret.
-- **Embedded:** compile an encrypted vault and its unlock material into a native module. This hides plaintext from simple string searches.
+- **Embedded:** encrypt dotenv during the Python application build and compile the resulting bundle into the application. This hides plaintext from simple string searches.
 
-Anyone who can load an embedded module can retrieve its values without a debugger.
+A recipient can recover embedded unlock material and retrieve the values.
 Embedded mode is obfuscation, not confidentiality against the recipient.
 The module never creates a plaintext dotenv file at runtime or copies secrets into the process environment.
 
@@ -41,9 +42,47 @@ Do not put the password in Python source.
 
 For an in-memory vault, use `secure_store.seal(dotenv_text, password)` and `secure_store.Store(vault_bytes, password)`.
 
-## Embedded setup
+## Python application builds (Nuitka)
 
-Build a separate wheel for each app's secrets:
+Use a generic wheel with the `nuitka` extra.
+Set `WHEEL` to the absolute path of the selected compatible wheel.
+For wheel production, see [generic wheel builds](DEVELOPMENT.md#generic-wheel).
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python "${WHEEL}[nuitka]"
+source .venv/bin/activate
+```
+
+Set `BUILD_CREDENTIAL` through a secret manager or a hidden prompt.
+The application calls `secure_store.Store.embedded()` and retrieves values with `store.get("API_KEY")`.
+Build it with one invocation:
+
+```bash
+SECURE_STORE_ENV_FILE=.env SECURE_STORE_CRED="$BUILD_CREDENTIAL" python -m secure_store --mode=onefile app.py
+```
+
+Use `--mode=standalone` for a directory distribution instead.
+Nuitka requires a C compiler on the application build machine.
+The build extra supplies Nuitka, zstandard, and patchelf on Linux.
+The virtual environment must be active so build helpers are on PATH.
+
+The hook reads and encrypts dotenv inside Nuitka's build process through the precompiled native extension.
+There is no separate sealing command or pre-existing encrypted vault.
+It replaces `secure_store._embedded` source in memory without modifying the installed wheel or application source.
+Only encrypted values and a masked derived key enter the generated resource.
+The original build password is not embedded.
+The hook removes its build variables from the compiler process environment before native compilation.
+The finished application needs neither a runtime credential nor the original dotenv file.
+
+Missing or empty build variables, invalid input, and oversized input fail the build.
+Excluding the embedded module or including the selected plaintext dotenv as a data file also fails the build.
+Treat generated build directories and final binaries as private artifacts because their unlock material remains recoverable.
+
+## Optional wheel-level embedding
+
+The native Cargo build can also embed secrets directly in a wheel.
+This separate path requires Rust for each customized wheel and is not needed for the Nuitka workflow above.
 
 ```bash
 SECURE_STORE_ENV_FILE="$(pwd)/.env" uvx maturin build --release --out target/wheels-embedded
@@ -53,7 +92,7 @@ uv pip install --reinstall target/wheels-embedded/*.whl
 Use `secure_store.Store.embedded()` to open the compiled vault.
 Call `store.get("API_KEY")` to retrieve one value.
 This mode needs no runtime password or dotenv file.
-A module built without an embedded vault raises `RuntimeError` for `Store.embedded()`.
+A generic wheel outside a hooked application raises `RuntimeError` for `Store.embedded()`.
 
 Do not distribute the plaintext `.env`, source archives, or build directory.
 The wheel contains your app's recoverable unlock material.
@@ -66,6 +105,7 @@ Nuitka standalone builds must include the installed `secure_store` package and i
 PyArmor distributions must also include this package.
 The native module does not depend on either compiler's string protection.
 Neither tool prevents a recipient from retrieving embedded secrets.
+PyArmor alone does not execute the Nuitka encryption hook.
 
 See [packaging smoke checks](DEVELOPMENT.md#packaging-smoke-checks) for the demonstration build commands and their verification scope.
 
@@ -73,7 +113,9 @@ See [packaging smoke checks](DEVELOPMENT.md#packaging-smoke-checks) for the demo
 
 - [Store](../modules/store/src/lib.rs) owns dotenv parsing, bounded reads, password derivation, authenticated serialization, and per-value decryption.
 - [Python bindings](../modules/python/src/lib.rs) expose the shared store through PyO3.
-- [Embedded build](../modules/python/build.rs) encrypts the selected dotenv input during compilation.
+- [Nuitka entry point](../python/secure_store/__main__.py) enables the installed [build hook](../python/secure_store/nuitka_plugin.py).
+- [Embedded resource](../python/secure_store/_embedded.py) holds the stub that the build hook replaces in memory.
+- [Native embedded build](../modules/python/build.rs) provides optional wheel-level embedding.
 - [CLI](../modules/cli/src/main.rs) reads passwords and publishes encrypted vault files without overwriting existing files.
 
 The Python and CLI crates share the same store implementation.

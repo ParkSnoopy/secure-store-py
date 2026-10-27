@@ -20,7 +20,11 @@ pub const MAX_ENV_BYTES: usize = 64 * 1024;
 pub const MAX_VAULT_BYTES: usize = 1024 * 1024;
 /// Maximum unlock password size, in bytes.
 pub const MAX_PASSWORD_BYTES: usize = 1024;
+/// Maximum application-embedded bundle size, including masked unlock material.
+pub const MAX_EMBEDDED_BYTES: usize = MAX_VAULT_BYTES + 68;
 const FORMAT_VERSION: u8 = 1;
+const EMBEDDED_MAGIC: &[u8; 4] = b"SSB1";
+type DerivedKey = Zeroizing<[u8; 32]>;
 
 /// Failures never include plaintext values, passwords, or parser input.
 #[derive(Debug, Error)]
@@ -84,7 +88,7 @@ struct Envelope {
 /// Dropping the store clears its derived key. Returned plaintext belongs to
 /// the caller and needs separate lifetime management.
 pub struct Store {
-    key: Zeroizing<[u8; 32]>,
+    key: DerivedKey,
     entries: BTreeMap<String, Record>,
 }
 
@@ -112,12 +116,31 @@ impl Store {
     pub fn open(data: &[u8], password: &[u8]) -> Result<Self, StoreError> {
         check_size(data.len(), MAX_VAULT_BYTES)?;
         check_password(password)?;
-        let envelope: Envelope =
-            serde_json::from_slice(data).map_err(|_| StoreError::InvalidFormat)?;
-        if envelope.manifest.version != FORMAT_VERSION {
-            return Err(StoreError::InvalidFormat);
-        }
+        let envelope = read_envelope(data)?;
         let key = derive_key(password, &envelope.manifest.salt)?;
+        Self::authenticate(envelope, key)
+    }
+
+    /// Open an application bundle containing a vault and masked derived key.
+    ///
+    /// Masking obstructs static inspection only; recipients can recover the key.
+    ///
+    /// # Errors
+    /// Returns an error for oversized, malformed, or unauthenticated bundles.
+    pub fn open_embedded(data: &[u8]) -> Result<Self, StoreError> {
+        check_size(data.len(), MAX_EMBEDDED_BYTES)?;
+        let data = data
+            .strip_prefix(EMBEDDED_MAGIC)
+            .ok_or(StoreError::InvalidFormat)?;
+        let (unlock, data) = data.split_at_checked(64).ok_or(StoreError::InvalidFormat)?;
+        let mut key = Zeroizing::new([0; 32]);
+        for ((result, mask), masked) in key.iter_mut().zip(&unlock[..32]).zip(&unlock[32..]) {
+            *result = mask ^ masked;
+        }
+        Self::authenticate(read_envelope(data)?, key)
+    }
+
+    fn authenticate(envelope: Envelope, key: DerivedKey) -> Result<Self, StoreError> {
         let cipher = cipher(&key)?;
         let manifest = serialize(&envelope.manifest)?;
         let proof = decrypt(&cipher, &envelope.authentication, &manifest)?;
@@ -158,6 +181,28 @@ impl Store {
 /// # Errors
 /// Returns an error for invalid syntax, sizes, passwords, randomness, or encryption.
 pub fn seal_dotenv(source: &str, password: &[u8]) -> Result<Vec<u8>, StoreError> {
+    seal_with_key(source, password).map(|(data, _)| data)
+}
+
+/// Encrypt dotenv and package its masked derived key for application builds.
+///
+/// The original password is not embedded. The bundled key still permits recovery
+/// of every value; this format is not confidential against its recipient.
+///
+/// # Errors
+/// Returns an error for invalid dotenv, passwords, sizes, or cryptographic failures.
+pub fn seal_embedded(source: &str, password: &[u8]) -> Result<Vec<u8>, StoreError> {
+    let (data, key) = seal_with_key(source, password)?;
+    let mask: [u8; 32] = random_array()?;
+    let mut bundle = Vec::with_capacity(data.len() + 68);
+    bundle.extend_from_slice(EMBEDDED_MAGIC);
+    bundle.extend_from_slice(&mask);
+    bundle.extend(key.iter().zip(mask).map(|(key, mask)| key ^ mask));
+    bundle.extend_from_slice(&data);
+    Ok(bundle)
+}
+
+fn seal_with_key(source: &str, password: &[u8]) -> Result<(Vec<u8>, DerivedKey), StoreError> {
     check_size(source.len(), MAX_ENV_BYTES)?;
     check_password(password)?;
     let values = dotenvy::from_read_iter(source.as_bytes())
@@ -187,7 +232,7 @@ pub fn seal_dotenv(source: &str, password: &[u8]) -> Result<Vec<u8>, StoreError>
         authentication,
     })?;
     check_size(data.len(), MAX_VAULT_BYTES)?;
-    Ok(data)
+    Ok((data, key))
 }
 
 /// Read a bounded UTF-8 dotenv file and seal it without modifying the source.
@@ -198,6 +243,25 @@ pub fn seal_file(path: impl AsRef<Path>, password: &[u8]) -> Result<Vec<u8>, Sto
     let source = read_limited(path.as_ref(), MAX_ENV_BYTES)?;
     let source = std::str::from_utf8(&source).map_err(|_| StoreError::InvalidEnv)?;
     seal_dotenv(source, password)
+}
+
+/// Read a bounded UTF-8 dotenv file and encrypt an application-embedded bundle.
+///
+/// # Errors
+/// Returns an error for file access, invalid UTF-8, or any [`seal_embedded`] failure.
+pub fn seal_embedded_file(path: impl AsRef<Path>, password: &[u8]) -> Result<Vec<u8>, StoreError> {
+    let source = read_limited(path.as_ref(), MAX_ENV_BYTES)?;
+    let source = std::str::from_utf8(&source).map_err(|_| StoreError::InvalidEnv)?;
+    seal_embedded(source, password)
+}
+
+fn read_envelope(data: &[u8]) -> Result<Envelope, StoreError> {
+    check_size(data.len(), MAX_VAULT_BYTES)?;
+    let envelope: Envelope = serde_json::from_slice(data).map_err(|_| StoreError::InvalidFormat)?;
+    if envelope.manifest.version != FORMAT_VERSION {
+        return Err(StoreError::InvalidFormat);
+    }
+    Ok(envelope)
 }
 
 const fn check_size(length: usize, maximum: usize) -> Result<(), StoreError> {
@@ -229,7 +293,7 @@ fn random_array<const N: usize>() -> Result<[u8; N], StoreError> {
     Ok(bytes)
 }
 
-fn derive_key(password: &[u8], salt: &[u8; 16]) -> Result<Zeroizing<[u8; 32]>, StoreError> {
+fn derive_key(password: &[u8], salt: &[u8; 16]) -> Result<DerivedKey, StoreError> {
     let parameters =
         Params::new(64 * 1024, 3, 1, Some(32)).map_err(|_| StoreError::KeyDerivation)?;
     let mut key = Zeroizing::new([0; 32]);

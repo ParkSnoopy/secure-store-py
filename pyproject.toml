@@ -10,9 +10,17 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-only"
 
+[project.optional-dependencies]
+nuitka = [
+    "nuitka>=4.3,<5",
+    "patchelf; sys_platform == 'linux'",
+    "zstandard",
+]
+
 [project.urls]
 Repository = "https://github.com/ParkSnoopy/secure-store-py"
 
 [tool.maturin]
 manifest-path = "modules/python/Cargo.toml"
-module-name = "secure_store"
+python-source = "python"
+module-name = "secure_store._native"
