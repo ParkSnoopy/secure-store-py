@@ -3,7 +3,7 @@
 ```python
 from secure_store import Store
 
-vault = Store.open("secrets.vault", password)  # Or: Store.embedded()
+vault = Store.open(".env")
 api_key = vault.get("API_KEY")
 ```
 

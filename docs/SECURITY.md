@@ -2,6 +2,10 @@
 
 ## Local modes
 
+Without an embedded bundle, `Store.open(path)` reads the named plaintext dotenv file and emits a `RuntimeWarning`.
+The file remains plaintext on disk and must not be distributed or committed.
+The store encrypts its values in memory after parsing, but plaintext copies can remain in memory.
+
 External-password mode protects vault contents when an attacker copies the vault but does not know the password.
 Use a strong password or a random secret supplied outside the application.
 Do not distribute the password beside the vault or place it in application source.
@@ -80,6 +84,9 @@ The hook invokes the installed native extension for bounded input reads, dotenv 
 It supplies generated module source in memory without changing installed package files.
 It rejects distribution of the selected plaintext input as a data file, including filesystem aliases.
 It also rejects exclusion of the embedded resource.
+In an embedded application, `Store.open(path)` selects the single embedded bundle regardless of the supplied path.
+It does not read the path or fall back to plaintext when the bundle fails authentication.
+An explicitly supplied password selects the external encrypted-vault path instead.
 
 The bundle starts with the four bytes `SSB1`, followed by a random 32-byte mask and the 32-byte derived key XORed with that mask.
 The remaining bytes are the normal authenticated version-1 vault.

@@ -10,6 +10,7 @@ Installing a compatible prebuilt wheel and building an application with it do no
 
 - **External password:** keep the password outside the distributed app. This protects a copied vault when the password remains secret.
 - **Embedded:** encrypt dotenv during the Python application build and compile the resulting bundle into the application. This hides plaintext from simple string searches.
+- **Development:** open a plaintext dotenv file directly with `Store.open(".env")`. The module emits a `RuntimeWarning` because the file remains unencrypted on disk.
 
 A recipient can recover embedded unlock material and retrieve the values.
 Embedded mode is obfuscation, not confidentiality against the recipient.
@@ -44,9 +45,10 @@ For an in-memory vault, use `secure_store.seal(dotenv_text, password)` and `secu
 
 ## Python application builds (Nuitka)
 
-Use a generic wheel with the `nuitka` extra.
+Use a generic wheel with the `nuitka` extra for the target OS and architecture.
 Set `WHEEL` to the absolute path of the selected compatible wheel.
 For wheel production, see [generic wheel builds](DEVELOPMENT.md#generic-wheel).
+For Linux:
 
 ```bash
 uv venv --python 3.12 .venv
@@ -55,11 +57,23 @@ source .venv/bin/activate
 ```
 
 Set `BUILD_CREDENTIAL` through a secret manager or a hidden prompt.
-The application calls `secure_store.Store.embedded()` and retrieves values with `store.get("API_KEY")`.
+The application calls `secure_store.Store.open(".env")` and retrieves values with `store.get("API_KEY")`.
 Build it with one invocation:
 
 ```bash
 SECURE_STORE_ENV_FILE=.env SECURE_STORE_CRED="$BUILD_CREDENTIAL" python -m secure_store --mode=onefile app.py
+```
+
+For Windows PowerShell, select a Windows wheel and use:
+
+```powershell
+uv venv --python 3.12 .venv
+uv pip install --python .venv/Scripts/python.exe "${WHEEL}[nuitka]"
+.venv/Scripts/Activate.ps1
+$env:SECURE_STORE_ENV_FILE = ".env"
+$env:SECURE_STORE_CRED = $BUILD_CREDENTIAL
+python -m secure_store --mode=onefile app.py
+Remove-Item Env:SECURE_STORE_ENV_FILE, Env:SECURE_STORE_CRED
 ```
 
 Use `--mode=standalone` for a directory distribution instead.
@@ -74,6 +88,10 @@ Only encrypted values and a masked derived key enter the generated resource.
 The original build password is not embedded.
 The hook removes its build variables from the compiler process environment before native compilation.
 The finished application needs neither a runtime credential nor the original dotenv file.
+Without a build-time bundle, `Store.open(path)` reads the supplied plaintext dotenv and warns.
+With an embedded bundle, it returns the one embedded store for any supplied path and does not read that path.
+Applications needing multiple independently selected stores must use a different design.
+Passing a password explicitly continues to open a password-protected vault file.
 
 Missing or empty build variables, invalid input, and oversized input fail the build.
 Excluding the embedded module or including the selected plaintext dotenv as a data file also fails the build.
@@ -89,7 +107,7 @@ SECURE_STORE_ENV_FILE="$(pwd)/.env" uvx maturin build --release --out target/whe
 uv pip install --reinstall target/wheels-embedded/*.whl
 ```
 
-Use `secure_store.Store.embedded()` to open the compiled vault.
+Use `secure_store.Store.open(".env")` to open the compiled vault.
 Call `store.get("API_KEY")` to retrieve one value.
 This mode needs no runtime password or dotenv file.
 A generic wheel outside a hooked application raises `RuntimeError` for `Store.embedded()`.

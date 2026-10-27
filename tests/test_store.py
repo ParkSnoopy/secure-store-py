@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -96,6 +97,26 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 secure_store.Store.open(path.with_suffix(".missing"), PASSWORD)
 
+    @unittest.skipIf(
+        os.environ.get("SECURE_STORE_TEST_EMBEDDED") == "1", "requires generic wheel"
+    )
+    def test_plaintext_development_file_warns_and_validates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(SOURCE, encoding="utf-8")
+            before = dict(os.environ)
+            with self.assertWarnsRegex(RuntimeWarning, "plaintext dotenv"):
+                store = secure_store.Store.open(path)
+            self.assertEqual(store.get("API_KEY"), MARKER)
+            self.assertEqual(dict(os.environ), before)
+            self.assertEqual(path.read_text(encoding="utf-8"), SOURCE)
+            for data in [b"\xff", b"API_KEY='unterminated", b"x" * (64 * 1024 + 1)]:
+                path.write_bytes(data)
+                with self.assertWarns(RuntimeWarning), self.assertRaises(ValueError):
+                    secure_store.Store.open(path)
+            with self.assertWarns(RuntimeWarning), self.assertRaises(OSError):
+                secure_store.Store.open(path.with_name("missing.env"))
+
     def test_invalid_input_and_redacted_errors(self):
         for source in [f"{MARKER} missing equals", f"API_KEY='{MARKER}"]:
             with self.assertRaisesRegex(ValueError, "invalid dotenv syntax") as raised:
@@ -131,10 +152,25 @@ class StoreTests(unittest.TestCase):
             self.assertNotIn(MARKER.encode(), data)
             self.assertNotIn(PASSWORD.encode(), data)
             self.assertEqual(source.read_text(), SOURCE)
+            external = source.with_name("external.vault")
+            external.write_bytes(
+                secure_store.seal("API_KEY='external-value'", PASSWORD)
+            )
             with patch.object(_embedded, "DATA", data):
                 store = secure_store.Store.embedded()
                 self.assertEqual(store.get("API_KEY"), MARKER)
                 self.assertEqual(store.get("EMPTY"), "")
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error")
+                    self.assertEqual(
+                        secure_store.Store.open("any-name.env").get("API_KEY"), MARKER
+                    )
+                    self.assertEqual(
+                        secure_store.Store.open(external, PASSWORD).get("API_KEY"),
+                        "external-value",
+                    )
+                    with self.assertRaisesRegex(ValueError, "authentication failed"):
+                        secure_store.Store.open(external, "wrong-password")
             for offset in [0, 4, 36, 68, len(data) - 1]:
                 changed = bytearray(data)
                 changed[offset] ^= 1
@@ -143,6 +179,11 @@ class StoreTests(unittest.TestCase):
                     self.assertRaises(ValueError),
                 ):
                     secure_store.Store.embedded()
+                with (
+                    patch.object(_embedded, "DATA", bytes(changed)),
+                    self.assertRaises(ValueError),
+                ):
+                    secure_store.Store.open(source)
             for invalid in [b"", b"SSB1", b"x" * (1024 * 1024 + 69)]:
                 with (
                     patch.object(_embedded, "DATA", invalid),
@@ -391,7 +432,7 @@ class NuitkaBuildTests(unittest.TestCase):
                 "import os\nfrom hashlib import sha256\nfrom secure_store import Store\n"
                 "if 'SECURE_STORE_CRED' in os.environ:\n"
                 "    raise RuntimeError('Unexpected runtime credential')\n"
-                "value = Store.embedded().get('API_KEY')\n"
+                "value = Store.open('.env').get('API_KEY')\n"
                 f"if sha256(value.encode()).hexdigest() != {expected!r}:\n"
                 "    raise RuntimeError('Wrong embedded vault')\n"
                 "print('Application build vault unlocked.')\n"

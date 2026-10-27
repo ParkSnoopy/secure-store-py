@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use pyo3::{
-    exceptions::{PyKeyError, PyOSError, PyRuntimeError, PyValueError},
+    exceptions::{PyKeyError, PyOSError, PyRuntimeError, PyRuntimeWarning, PyValueError},
     prelude::*,
     types::{PyBytes, PyString},
 };
@@ -27,10 +27,37 @@ impl PythonStore {
             .map_err(|error| python_error(&error))
     }
 
-    /// Read and authenticate an encrypted vault file.
+    /// Open an embedded store, a development dotenv file, or a password vault.
     #[staticmethod]
-    fn open(py: Python<'_>, path: PathBuf, password: &str) -> PyResult<Self> {
-        py.detach(|| Vault::open_file(path, password.as_bytes()))
+    #[pyo3(signature = (path, password=None))]
+    fn open(py: Python<'_>, path: PathBuf, password: Option<&str>) -> PyResult<Self> {
+        if let Some(password) = password {
+            return py
+                .detach(|| Vault::open_file(path, password.as_bytes()))
+                .map(|inner| Self { inner })
+                .map_err(|error| python_error(&error));
+        }
+        let data = py.import("secure_store._embedded")?.getattr("DATA")?;
+        let result = if data.is_none() {
+            py.detach(embedded_store)
+        } else {
+            let data = data.cast::<PyBytes>()?.as_bytes();
+            py.detach(|| Vault::open_embedded(data))
+        };
+        match result {
+            Ok(inner) => return Ok(Self { inner }),
+            Err(StoreError::NotEmbedded) => {}
+            Err(error) => return Err(python_error(&error)),
+        }
+        py.import("warnings")?.call_method1(
+            "warn",
+            (
+                "Reading plaintext dotenv for development; secrets are not protected on disk.",
+                py.get_type::<PyRuntimeWarning>(),
+                2,
+            ),
+        )?;
+        py.detach(|| Vault::open_dotenv_file(path))
             .map(|inner| Self { inner })
             .map_err(|error| python_error(&error))
     }

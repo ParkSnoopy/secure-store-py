@@ -161,6 +161,15 @@ impl Store {
         Self::open(&read_limited(path.as_ref(), MAX_VAULT_BYTES)?, password)
     }
 
+    /// Read plaintext dotenv for development and encrypt its values in memory.
+    ///
+    /// # Errors
+    /// Returns an error for file access, invalid dotenv, or encryption failure.
+    pub fn open_dotenv_file(path: impl AsRef<Path>) -> Result<Self, StoreError> {
+        let password = Zeroizing::new(random_array::<32>()?);
+        Self::open_embedded(&seal_embedded_file(path, password.as_ref())?)
+    }
+
     /// Decrypt one value without caching plaintext or changing environment variables.
     ///
     /// # Errors
