@@ -1,0 +1,29 @@
+[package]
+name                 = "secure-store-py"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+keywords.workspace   = true
+categories.workspace = true
+description          = "Native Python bindings for local encrypted API key vaults"
+readme               = "../../README.md"
+
+[lib]
+name       = "secure_store"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3              = { version = "0.30", features = ["abi3-py310"] }
+secure-store-core = { workspace = true }
+zeroize           = { workspace = true }
+
+[build-dependencies]
+anyhow            = "1"
+getrandom         = "0.4"
+secure-store-core = { workspace = true }
+zeroize           = { workspace = true }
+
+[lints]
+workspace = true

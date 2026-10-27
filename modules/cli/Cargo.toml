@@ -1,0 +1,26 @@
+[package]
+name                 = "secure-store-cli"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+keywords.workspace   = true
+categories.workspace = true
+description          = "Seal dotenv files into authenticated local secret vaults"
+readme               = "../../README.md"
+
+[[bin]]
+name = "secure-store"
+path = "src/main.rs"
+
+[dependencies]
+anyhow            = "1"
+clap              = { version = "4", features = ["derive"] }
+rpassword         = "7"
+secure-store-core = { workspace = true }
+tempfile          = "3"
+zeroize           = { workspace = true }
+
+[lints]
+workspace = true

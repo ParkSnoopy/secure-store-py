@@ -1,0 +1,28 @@
+[package]
+name                 = "secure-store-core"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+keywords.workspace   = true
+categories.workspace = true
+description          = "Authenticated local vaults for API keys and dotenv values"
+readme               = "../../README.md"
+
+[dependencies]
+argon2           = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc", "zeroize"] }
+dotenvy          = "0.15"
+getrandom        = "0.4"
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1"
+thiserror        = "2"
+zeroize          = { workspace = true }
+
+[dev-dependencies]
+anyhow   = "1"
+tempfile = "3"
+
+[lints]
+workspace = true

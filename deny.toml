@@ -10,3 +10,7 @@ allow = [
     "Zlib",
     "Unicode-3.0",
 ]
+
+[[licenses.exceptions]]
+name = "target-lexicon"
+allow = ["Apache-2.0 WITH LLVM-exception"]

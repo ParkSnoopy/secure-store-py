@@ -1,10 +1,24 @@
-[package]
-name = "secure-store-py"
-version = "0.1.0"
-edition = "2024"
-license = "GPL-3.0-only"
+[workspace]
+members  = ["modules/store", "modules/python", "modules/cli"]
+resolver = "3"
 
-[dependencies]
+[workspace.package]
+version    = "0.1.1"
+edition    = "2024"
+license    = "GPL-3.0-only"
+authors    = ["ParkSnoopy <117149837+ParkSnoopy@users.noreply.github.com>"]
+repository = "https://github.com/ParkSnoopy/secure-store-py"
+keywords   = ["python", "secrets", "dotenv", "encryption"]
+categories = ["cryptography", "config"]
+
+[workspace.dependencies]
+secure-store-core = { path = "modules/store", version = "0.1" }
+zeroize           = "1"
+
+[profile.release]
+lto           = "thin"
+strip         = "symbols"
+codegen-units = 1
 
 # ============================================
 # RUST-MAGIC-LINTER (maximum preset)
@@ -18,7 +32,7 @@ license = "GPL-3.0-only"
 #
 # WARNING: This is very strict and may require significant code changes
 
-[lints.rust]
+[workspace.lints.rust]
 # Safety - forbid means even #![allow(...)] can't override
 unsafe_code = "forbid"
 non_ascii_idents = "forbid"
@@ -35,10 +49,10 @@ missing_debug_implementations = "deny"
 missing_copy_implementations = "deny"
 unfulfilled_lint_expectations = "deny"
 
-[lints.rustdoc]
+[workspace.lints.rustdoc]
 all = { level = "deny", priority = -1 }
 
-[lints.clippy]
+[workspace.lints.clippy]
 # === ALL LINT GROUPS AT DENY ===
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
