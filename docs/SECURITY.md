@@ -77,9 +77,9 @@ Protect that file separately and never package it with the vault.
 
 ## Python application-build encryption
 
-The Nuitka hook reads SECURE_STORE_ENV_FILE and SECURE_STORE_CRED inside the application build.
-Both variables are mandatory.
-The hook removes them from that process environment before C compilation.
+The Nuitka hook requires SECURE_STORE_ENV_FILE and accepts an optional SECURE_STORE_CRED inside the application build.
+If the credential is missing or empty, the hook generates a fresh password from 32 bytes of cryptographic randomness.
+The hook removes the variables from that process environment before C compilation.
 The hook invokes the installed native extension for bounded input reads, dotenv parsing, and encryption.
 It supplies generated module source in memory without changing installed package files.
 It rejects distribution of the selected plaintext input as a data file, including filesystem aliases.
@@ -96,7 +96,7 @@ It does not require the original password or repeat password derivation at runti
 Malformed bundles and authentication failures must not fall back to a wheel-level vault.
 
 The original password and plaintext values are not generated as resource literals.
-The environment still contains plaintext credentials during part of the build and may be inspected by local processes or CI infrastructure.
+When supplied through the environment, credentials may be inspected by local processes or CI infrastructure during part of the build.
 Literal shell assignments can expose credentials through command history, and shell tracing can expose expanded variables.
 The build process and Python allocator may retain credential copies despite removing environment variables.
 Generated resource data, build caches, and final binaries contain recoverable decryption capability.

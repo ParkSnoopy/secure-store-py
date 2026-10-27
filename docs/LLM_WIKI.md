@@ -56,12 +56,11 @@ uv pip install --python .venv/bin/python "${WHEEL}[nuitka]"
 source .venv/bin/activate
 ```
 
-Set `BUILD_CREDENTIAL` through a secret manager or a hidden prompt.
 The application calls `secure_store.Store.open(".env")` and retrieves values with `store.get("API_KEY")`.
 Build it with one invocation:
 
 ```bash
-SECURE_STORE_ENV_FILE=.env SECURE_STORE_CRED="$BUILD_CREDENTIAL" python -m secure_store --mode=onefile app.py
+SECURE_STORE_ENV_FILE=.env python -m secure_store --mode=onefile app.py
 ```
 
 For Windows PowerShell, select a Windows wheel and use:
@@ -71,9 +70,8 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/Scripts/python.exe "${WHEEL}[nuitka]"
 .venv/Scripts/Activate.ps1
 $env:SECURE_STORE_ENV_FILE = ".env"
-$env:SECURE_STORE_CRED = $BUILD_CREDENTIAL
 python -m secure_store --mode=onefile app.py
-Remove-Item Env:SECURE_STORE_ENV_FILE, Env:SECURE_STORE_CRED
+Remove-Item Env:SECURE_STORE_ENV_FILE
 ```
 
 Use `--mode=standalone` for a directory distribution instead.
@@ -82,6 +80,8 @@ The build extra supplies Nuitka, zstandard, and patchelf on Linux.
 The virtual environment must be active so build helpers are on PATH.
 
 The hook reads and encrypts dotenv inside Nuitka's build process through the precompiled native extension.
+When `SECURE_STORE_CRED` is missing or empty, the hook generates a fresh cryptographically random password for the build.
+To supply a password instead, set `SECURE_STORE_CRED` from a secret manager or hidden prompt.
 There is no separate sealing command or pre-existing encrypted vault.
 It replaces `secure_store._embedded` source in memory without modifying the installed wheel or application source.
 Only encrypted values and a masked derived key enter the generated resource.
@@ -93,7 +93,7 @@ With an embedded bundle, it returns the one embedded store for any supplied path
 Applications needing multiple independently selected stores must use a different design.
 Passing a password explicitly continues to open a password-protected vault file.
 
-Missing or empty build variables, invalid input, and oversized input fail the build.
+A missing or empty `SECURE_STORE_ENV_FILE`, invalid input, and oversized input fail the build.
 Excluding the embedded module or including the selected plaintext dotenv as a data file also fails the build.
 Treat generated build directories and final binaries as private artifacts because their unlock material remains recoverable.
 

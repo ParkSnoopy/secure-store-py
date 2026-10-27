@@ -321,6 +321,39 @@ class DistributionTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("nuitka"), "install the nuitka extra")
 class NuitkaBuildTests(unittest.TestCase):
+    def test_build_credential_selection(self):
+        from secure_store import nuitka_plugin
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / ".env"
+            source.write_text(SOURCE, encoding="utf-8")
+            for supplied in [None, "", PASSWORD]:
+                environment = {"SECURE_STORE_ENV_FILE": str(source)}
+                if supplied is not None:
+                    environment["SECURE_STORE_CRED"] = supplied
+                with (
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(nuitka_plugin, "isStandaloneMode", return_value=True),
+                    patch.object(
+                        nuitka_plugin.secrets,
+                        "token_urlsafe",
+                        return_value="generated-test-password",
+                    ) as generate,
+                    patch.object(
+                        nuitka_plugin, "_seal_embedded_file", return_value=b"bundle"
+                    ) as seal,
+                ):
+                    nuitka_plugin.NuitkaPluginSecureStore()
+                    seal.assert_called_once_with(
+                        source, supplied or "generated-test-password"
+                    )
+                    if supplied:
+                        generate.assert_not_called()
+                    else:
+                        generate.assert_called_once_with(32)
+                    self.assertNotIn("SECURE_STORE_CRED", os.environ)
+                    self.assertNotIn("SECURE_STORE_ENV_FILE", os.environ)
+
     def build(self, source, entry, output, extra=(), credential=PASSWORD):
         environment = dict(os.environ)
         environment.pop("PYTHONPATH", None)
@@ -356,8 +389,6 @@ class NuitkaBuildTests(unittest.TestCase):
             source, entry = root / "input.env", root / "app.py"
             entry.write_text("from secure_store import Store\nStore.embedded()\n")
             cases = [
-                (SOURCE.encode(), None, "Set SECURE_STORE_ENV_FILE"),
-                (SOURCE.encode(), "", "Set SECURE_STORE_ENV_FILE"),
                 (SOURCE.encode(), "x" * 1025, "Cannot encrypt"),
                 (f"API_KEY='{MARKER}".encode(), PASSWORD, "Cannot encrypt"),
                 (b"\xff", PASSWORD, "Cannot encrypt"),
@@ -388,6 +419,18 @@ class NuitkaBuildTests(unittest.TestCase):
             result = self.build(source, entry, root / "out")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b"Use --mode=standalone", result.stdout + result.stderr)
+            for credential in [None, ""]:
+                result = self.build(
+                    source,
+                    entry,
+                    root / "out",
+                    ["--mode=standalone", "--generate-c-only"],
+                    credential,
+                )
+                self.assertEqual(
+                    result.returncode, 0, result.stderr.decode(errors="replace")
+                )
+                self.assertNotIn(MARKER.encode(), result.stdout + result.stderr)
 
     def test_build_rejects_plaintext_inclusion_and_excluded_resource(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -439,14 +482,21 @@ class NuitkaBuildTests(unittest.TestCase):
             )
             output = Path(os.environ.get("SECURE_STORE_TEST_BUILD_DIR", root / "out"))
             output = output.resolve()
-            result = self.build(
-                source, entry, output, ["--mode=onefile", "--assume-yes-for-downloads"]
-            )
-            build_log = result.stdout + result.stderr
-            self.assertNotIn(MARKER.encode(), build_log)
-            self.assertNotIn(PASSWORD.encode(), build_log)
-            self.assertEqual(result.returncode, 0, build_log.decode(errors="replace"))
-            (output / "build.log").write_bytes(build_log)
+            for label, credential in [("generated", None), ("supplied", PASSWORD)]:
+                build_output = output / label
+                result = self.build(
+                    source,
+                    entry,
+                    build_output,
+                    ["--mode=onefile", "--assume-yes-for-downloads"],
+                    credential,
+                )
+                build_log = result.stdout + result.stderr
+                self.assertNotIn(MARKER.encode(), build_log)
+                self.assertNotIn(PASSWORD.encode(), build_log)
+                self.assertEqual(
+                    result.returncode, 0, build_log.decode(errors="replace")
+                )
             source.unlink()
             entry.unlink()
             runtime = root / "runtime"
@@ -455,18 +505,22 @@ class NuitkaBuildTests(unittest.TestCase):
             for name in ["SECURE_STORE_ENV_FILE", "SECURE_STORE_CRED", "PYTHONPATH"]:
                 environment.pop(name, None)
             suffix = ".exe" if sys.platform == "win32" else ".bin"
-            binary = output / f"app{suffix}"
-            standalone = output / "app.dist" / binary.name
-            for executable in [binary, standalone]:
-                result = subprocess.run(
-                    [str(executable)],
-                    cwd=runtime,
-                    env=environment,
-                    capture_output=True,
-                    check=True,
-                    timeout=60,
-                )
-                self.assertEqual(result.stdout, b"Application build vault unlocked.\n")
+            for label in ["generated", "supplied"]:
+                build_output = output / label
+                binary = build_output / f"app{suffix}"
+                standalone = build_output / "app.dist" / binary.name
+                for executable in [binary, standalone]:
+                    result = subprocess.run(
+                        [str(executable)],
+                        cwd=runtime,
+                        env=environment,
+                        capture_output=True,
+                        check=True,
+                        timeout=60,
+                    )
+                    self.assertEqual(
+                        result.stdout, b"Application build vault unlocked.\n"
+                    )
             for path in output.rglob("*"):
                 if path.is_file():
                     data = path.read_bytes()

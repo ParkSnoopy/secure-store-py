@@ -1,6 +1,7 @@
 """Encrypt the selected dotenv during Nuitka's application build."""
 
 import os
+import secrets
 from pathlib import Path
 
 from nuitka.options.Options import isStandaloneMode
@@ -22,11 +23,11 @@ class NuitkaPluginSecureStore(NuitkaPluginBase):
             self.sysexit(
                 "Use --mode=standalone or --mode=onefile for secure-store builds."
             )
-        if not source or not credential:
-            self.sysexit(
-                "Set SECURE_STORE_ENV_FILE and SECURE_STORE_CRED for this build."
-            )
+        if not source:
+            self.sysexit("Set SECURE_STORE_ENV_FILE for this build.")
         try:
+            if not credential:
+                credential = secrets.token_urlsafe(32)
             self.source = Path(source).resolve(strict=True)
             self.data = _seal_embedded_file(self.source, credential)
         except (OSError, ValueError, RuntimeError):

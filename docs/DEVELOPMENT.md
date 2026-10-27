@@ -58,17 +58,17 @@ Cargo generates embedded material in its build output rather than the source tre
 
 Build a generic wheel, then set WHEEL to its absolute path.
 The following commands target Linux and Python 3.12.
-The credential below and [dotenv fixture](../examples/demo.env) are synthetic demonstration data.
+The [dotenv fixture](../examples/demo.env) contains synthetic demonstration data.
 
 ```bash
 uv pip install --python .venv/bin/python "${WHEEL}[nuitka]"
 source .venv/bin/activate
-SECURE_STORE_ENV_FILE=examples/demo.env SECURE_STORE_CRED=synthetic-build-password-only python -m secure_store --mode=onefile --output-dir=target/nuitka-app --assume-yes-for-downloads examples/embedded.py
+SECURE_STORE_ENV_FILE=examples/demo.env python -m secure_store --mode=onefile --output-dir=target/nuitka-app --assume-yes-for-downloads examples/embedded.py
 SECURE_STORE_NUITKA_BINARY="$(pwd)/target/nuitka-app/embedded.bin" python -m unittest discover -s tests -v
 SECURE_STORE_TEST_BUILD=1 SECURE_STORE_TEST_BUILD_DIR="$(pwd)/target/nuitka-build" python -m unittest discover -s tests -v
 ```
 
-The build regression starts with plaintext dotenv and no encrypted vault.
+The build regression starts with plaintext dotenv and no encrypted vault, with both generated and supplied build passwords.
 It invokes the installed Python compiler entry point with unusable CARGO and RUSTC selections.
 It removes the source and dotenv before running both executables from an empty directory without build variables.
 The test calls `Store.open(".env")` and checks automatic unlocking without a runtime password.
